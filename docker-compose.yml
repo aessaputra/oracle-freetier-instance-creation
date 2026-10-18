@@ -1,0 +1,44 @@
+services:
+  launcher:
+    image: ghcr.io/aessaputra/oracle-freetier-instance-creation:${IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: "no"
+    init: true
+    environment:
+      OCI_CONFIG: /config/config
+      OCT_FREE_AD: ${OCT_FREE_AD:?}
+      OCI_SUBNET_ID: ${OCI_SUBNET_ID:?}
+      DISPLAY_NAME: ${DISPLAY_NAME:-oci-free-instance}
+      REQUEST_WAIT_TIME_SECS: ${REQUEST_WAIT_TIME_SECS:-60}
+      SSH_AUTHORIZED_KEYS_FILE: /data/ssh/instance.pub
+      OCI_IMAGE_ID: ${OCI_IMAGE_ID:-}
+      OCI_COMPUTE_SHAPE: ${OCI_COMPUTE_SHAPE:-VM.Standard.A1.Flex}
+      SECOND_MICRO_INSTANCE: ${SECOND_MICRO_INSTANCE:-False}
+      OPERATING_SYSTEM: ${OPERATING_SYSTEM:-Canonical Ubuntu}
+      OS_VERSION: ${OS_VERSION:-22.04}
+      ASSIGN_PUBLIC_IP: ${ASSIGN_PUBLIC_IP:-false}
+      BOOT_VOLUME_SIZE: ${BOOT_VOLUME_SIZE:-50}
+      NOTIFY_EMAIL: ${NOTIFY_EMAIL:-False}
+      EMAIL: ${EMAIL:-}
+      EMAIL_PASSWORD: ${EMAIL_PASSWORD:-}
+      DISCORD_WEBHOOK: ${DISCORD_WEBHOOK:-}
+    volumes:
+      - launcher-data:/data
+      - type: bind
+        source: ${OCI_CONFIG_DIR:?}
+        target: /config
+        read_only: true
+        bind:
+          create_host_path: false
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  launcher-data:

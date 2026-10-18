@@ -85,6 +85,137 @@ In case of an unhandled exception leading to script termination, an email contai
 ./setup_init.sh rerun
 ```
 
+## Docker and Coolify
+
+The same `docker-compose.yml` works with Docker Compose and a Coolify
+Git-based Docker Compose application. No domain or published port is needed.
+The container runs as UID/GID `10001:10001` and exits after success; automatic
+restart is disabled. Existing provisioning behavior is unchanged.
+
+### GHCR image publication
+
+The `Publish container image` GitHub Actions workflow runs on pushes to `main`
+or manually from the Actions tab. It runs the offline smoke test on AMD64, then
+builds and publishes `linux/amd64` and `linux/arm64` images to
+`ghcr.io/aessaputra/oracle-freetier-instance-creation`.
+
+Authentication uses GitHub's automatic `GITHUB_TOKEN` with `packages: write`;
+no manually configured token or OCI credentials are required in Actions Secrets.
+
+Compose pulls the image and never builds it. The default tag is `latest`.
+For rollback, set `IMAGE_TAG=sha-<full-commit-sha>` in `.env` or Coolify Environment
+Variables and redeploy. Every successful publication also writes that tag.
+A workflow dispatch on an old commit can rebuild its tag with newer unpinned
+Python dependencies; pin an image digest for exact artifact rollback.
+Wait for the first image publication before deploying Compose. Git-based Coolify
+auto-deploy can race the image build; leave it off and deploy manually after the
+publish workflow succeeds. No Coolify auto-deploy webhook is configured here.
+
+### Configuration files
+
+On the **deployment server**, create a dedicated directory outside the repository
+(for example `/opt/oci-launcher/config`). Place your OCI API config in `config`
+and API private key in `api_private_key.pem` inside that directory. Use the fields
+shown in `sample_oci_config`, but set the key path to the **container** path:
+
+```ini
+key_file=/config/api_private_key.pem
+```
+
+The directory is mounted read-only at `/config`. Give UID/GID `10001:10001`
+read/traverse access, for example by setting that directory and its files to
+owner `10001:10001`, directory mode `0700`, and file mode `0600`.
+Keep a secure backup. Do not commit or bake credentials into the image.
+
+Create a local, git-ignored `.env` for Compose with these values (replace the
+example OCID with your existing subnet):
+
+```dotenv
+OCI_CONFIG_DIR=/opt/oci-launcher/config
+OCT_FREE_AD=AD-1
+OCI_SUBNET_ID=ocid1.subnet.oc1.your-existing-subnet
+DISPLAY_NAME=oci-free-instance
+REQUEST_WAIT_TIME_SECS=60
+```
+
+`OCI_CONFIG_DIR` must be an existing absolute path on the deployment server.
+`OCT_FREE_AD` accepts comma-separated AD suffixes. The Compose file requires an
+explicit subnet to avoid selecting an unintended network. Other settings under
+`environment:` can be overridden in `.env`, including `OCI_IMAGE_ID`, OS/shape,
+public IP assignment, boot volume size, and optional email/Discord notifications.
+Use plain values without surrounding quote characters in the Coolify dashboard.
+ARM resources remain 2 OCPU / 12 GB RAM as defined by the script; verify your
+remaining Always Free quota before starting. Docker does not enforce OCI billing
+limits. Run only one launcher against a given target tenancy/shape.
+
+### Docker Compose
+
+```bash
+docker compose config -q
+docker compose pull
+docker compose up -d
+docker compose ps -a
+docker compose exec launcher tail -f /data/launch_instance.log
+```
+
+The application writes operational logs to `/data`, not stdout. Startup errors
+can also be inspected with `docker compose logs launcher`. To inspect results
+after the process exits:
+
+```bash
+docker compose run --rm --no-deps --entrypoint sh launcher -c \
+  'tail -n 50 /data/launch_instance.log; cat /data/INSTANCE_CREATED'
+```
+
+Stop with `docker compose stop`. The `launcher-data` named volume retains logs,
+`images_list.json`, `INSTANCE_CREATED`, and generated SSH keys between container
+replacements. The default SSH public key is `/data/ssh/instance.pub`; its generated
+private key is `/data/ssh/instance_private`. Back it up securely to access your VM.
+To use an existing SSH public key, put it at that path in the volume before starting.
+Do not use `docker compose down -v` unless you intend to delete all persisted data,
+including the generated SSH private key.
+
+### Coolify
+
+1. Connect this fork as a **Git repository** application, select the **Docker
+   Compose** build strategy, set the repository root as Base Directory, and
+   select `/docker-compose.yml` as Docker Compose Location. Compose references
+   the prebuilt GHCR image; Coolify does not build the Dockerfile. Alternatively,
+   paste the definition into **Docker Compose Empty** for a registry-only Service
+   without Git automation.
+2. Load the Compose definition. In **Environment Variables**, fill
+   `OCI_CONFIG_DIR`, `OCT_FREE_AD`, and `OCI_SUBNET_ID`; customize optional settings
+   as needed. Supply runtime values only, not build-time credentials. The config
+   directory described above must exist on the selected deployment server.
+3. Leave **Domains** empty and **Connect to predefined network** off. No HTTP
+   healthcheck is needed for this outbound-only worker.
+4. Review **Show Deployable Compose**: confirm the `/config` mount is read-only,
+   the `/data` volume remains attached, and no ports or restart loop were added.
+   Deploy and check deployment/runtime logs. While running, use the container
+   Terminal to inspect `/data/launch_instance.log`.
+5. A stopped container with exit code `0` can mean the task finished, not an
+   unhealthy web app. Confirm `/data/INSTANCE_CREATED` and the instance in OCI.
+   Preserve the volume when redeploying and back it up, especially the SSH keys.
+
+Coolify must fetch a commit containing these files before it can deploy them.
+Local validation does not prove your installed Coolify version's deployment;
+review the generated Compose and verify the first live run separately.
+
+### Offline checks
+
+These checks do not use real OCI credentials or launch instances. The container
+smoke test generates a disposable API key, initializes the real OCI SDK locally,
+checks HTML rendering and SSH key generation, and verifies persisted files from
+a second container with networking disabled.
+
+```bash
+docker build -t oci-launcher:test .
+python3 tests/docker_smoke.py
+```
+
+References: [Docker bind mounts](https://docs.docker.com/engine/storage/bind-mounts/),
+[Coolify Docker Compose](https://coolify.io/docs/applications/builds/docker-compose).
+
 ## OCI Instance Creation Flow
 
 ```mermaid

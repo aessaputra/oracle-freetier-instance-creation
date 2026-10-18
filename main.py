@@ -191,7 +191,7 @@ def generate_html_body(instance):
         str: HTML body for the email.
     """
     # Replace placeholders with instance details
-    with open('email_content.html', 'r', encoding='utf-8') as email_temp:
+    with open(Path(__file__).resolve().with_name('email_content.html'), 'r', encoding='utf-8') as email_temp:
         html_template = email_temp.read()
     html_body = html_template.replace('&lt;INSTANCE_ID&gt;', instance.id)
     html_body = html_body.replace('&lt;DISPLAY_NAME&gt;', instance.display_name)
