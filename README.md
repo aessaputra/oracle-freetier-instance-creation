@@ -87,16 +87,17 @@ In case of an unhandled exception leading to script termination, an email contai
 
 ## Docker and Coolify
 
-The same `docker-compose.yml` works with Docker Compose and a Coolify
-Git-based Docker Compose application. No domain or published port is needed.
+The `docker-compose.yml` targets Coolify and uses its managed file-mount
+`content` extension. No domain or published port is needed.
 The container runs as UID/GID `10001:10001` and exits after success; automatic
 restart is disabled. Existing provisioning behavior is unchanged.
 
 ### GHCR image publication
 
-The `Publish container image` GitHub Actions workflow runs on pushes to `main`
-or manually from the Actions tab. It runs the offline smoke test on AMD64, then
-builds and publishes `linux/amd64` and `linux/arm64` images to
+The `Publish container image` GitHub Actions workflow runs only when started
+manually: open the **Actions** tab, select it, then **Run workflow** on `main`.
+It does not publish automatically on push. It runs the offline smoke test on
+AMD64, then builds and publishes `linux/amd64` and `linux/arm64` images to
 `ghcr.io/aessaputra/oracle-freetier-instance-creation`.
 
 Authentication uses GitHub's automatic `GITHUB_TOKEN` with `packages: write`;
@@ -113,32 +114,34 @@ publish workflow succeeds. No Coolify auto-deploy webhook is configured here.
 
 ### Configuration files
 
-On the **deployment server**, create a dedicated directory outside the repository
-(for example `/opt/oci-launcher/config`). Place your OCI API config in `config`
-and API private key in `api_private_key.pem` inside that directory. Use the fields
-shown in `sample_oci_config`, but set the key path to the **container** path:
+After loading Compose in Coolify, open the parsed file mounts under
+**Persistent Storage**. Fill the content of `/config/config` with your OCI API
+configuration and `/config/api_private_key.pem` with its matching API private key.
+Both mounts start with empty content; fill them before the first deployment.
+Use the fields in `sample_oci_config`, with:
 
 ```ini
 key_file=/config/api_private_key.pem
 ```
 
-The directory is mounted read-only at `/config`. Give UID/GID `10001:10001`
-read/traverse access, for example by setting that directory and its files to
-owner `10001:10001`, directory mode `0700`, and file mode `0600`.
-Keep a secure backup. Do not commit or bake credentials into the image.
+Coolify creates the files in the resource's managed directory before container
+startup. No `/opt` directory or `OCI_CONFIG_DIR` variable is required. The mounts
+are not marked read-only because Coolify disables dashboard editing for read-only
+files. Restrict resource-admin access: administrators may see the private key.
+Verify the generated files are readable by UID/GID `10001:10001` before considering
+the deployment ready. Keep a secure backup outside Git; never commit the populated
+Compose or credentials. Reloading/redeploying must preserve the saved file content;
+check it in the dashboard rather than replacing it with the empty template.
 
-Create a local, git-ignored `.env` for Compose with these values (replace the
-example OCID with your existing subnet):
+Set these values in Coolify Environment Variables (replace the example OCID):
 
 ```dotenv
-OCI_CONFIG_DIR=/opt/oci-launcher/config
 OCT_FREE_AD=AD-1
 OCI_SUBNET_ID=ocid1.subnet.oc1.your-existing-subnet
 DISPLAY_NAME=oci-free-instance
 REQUEST_WAIT_TIME_SECS=60
 ```
 
-`OCI_CONFIG_DIR` must be an existing absolute path on the deployment server.
 `OCT_FREE_AD` accepts comma-separated AD suffixes. The Compose file requires an
 explicit subnet to avoid selecting an unintended network. Other settings under
 `environment:` can be overridden in `.env`, including `OCI_IMAGE_ID`, OS/shape,
@@ -149,6 +152,10 @@ remaining Always Free quota before starting. Docker does not enforce OCI billing
 limits. Run only one launcher against a given target tenancy/shape.
 
 ### Docker Compose
+
+Stock Docker Compose does not accept Coolify's `content` extension. For standalone
+use, work from a local copy with `content` removed and create the two source files
+under `./config/` first. Do not commit those files. Then:
 
 ```bash
 docker compose config -q
@@ -184,12 +191,12 @@ including the generated SSH private key.
    paste the definition into **Docker Compose Empty** for a registry-only Service
    without Git automation.
 2. Load the Compose definition. In **Environment Variables**, fill
-   `OCI_CONFIG_DIR`, `OCT_FREE_AD`, and `OCI_SUBNET_ID`; customize optional settings
-   as needed. Supply runtime values only, not build-time credentials. The config
-   directory described above must exist on the selected deployment server.
+   `OCT_FREE_AD` and `OCI_SUBNET_ID`; customize optional settings as needed.
+   Fill both managed file mounts as described above; do not enter the private key
+   into Git or build arguments.
 3. Leave **Domains** empty and **Connect to predefined network** off. No HTTP
    healthcheck is needed for this outbound-only worker.
-4. Review **Show Deployable Compose**: confirm the `/config` mount is read-only,
+4. Review **Show Deployable Compose**: confirm both managed files target `/config/`,
    the `/data` volume remains attached, and no ports or restart loop were added.
    Deploy and check deployment/runtime logs. While running, use the container
    Terminal to inspect `/data/launch_instance.log`.

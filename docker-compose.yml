@@ -3,6 +3,8 @@ services:
     image: ghcr.io/aessaputra/oracle-freetier-instance-creation:${IMAGE_TAG:-latest}
     pull_policy: always
     restart: "no"
+    healthcheck:
+      disable: true
     init: true
     environment:
       OCI_CONFIG: /config/config
@@ -25,11 +27,13 @@ services:
     volumes:
       - launcher-data:/data
       - type: bind
-        source: ${OCI_CONFIG_DIR:?}
-        target: /config
-        read_only: true
-        bind:
-          create_host_path: false
+        source: ./config/oci_config
+        target: /config/config
+        content: ""
+      - type: bind
+        source: ./config/api_private_key.pem
+        target: /config/api_private_key.pem
+        content: ""
     security_opt:
       - no-new-privileges:true
     cap_drop:
